@@ -2,6 +2,9 @@
 import abc
 from typing import Optional
 import warnings
+from typing import Union, Tuple
+from peft import PeftModel
+
 
 import torch
 try:
@@ -46,7 +49,7 @@ def compute_skip_echo_len(model_name, conv, prompt):
     return skip_echo_len
 
 
-def load_model(model_path, device, num_gpus, max_gpu_memory="13GiB",
+def load_model(model_path: Union[str, Tuple[str, str]], device, num_gpus, max_gpu_memory="13GiB",
                load_8bit=False, debug=False):
     if device == "cpu":
         kwargs = {}
@@ -68,7 +71,17 @@ def load_model(model_path, device, num_gpus, max_gpu_memory="13GiB",
     else:
         raise ValueError(f"Invalid device: {device}")
 
-    if "chatglm" in model_path:
+    if isinstance(model_path, tuple):
+        backbone_path = model_path[0]
+        peft_path = model_path[1]
+        tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+        model = AutoModelForCausalLM.from_pretrained(backbone_path, low_cpu_mem_usage=True, **kwargs)
+        raise_warning_for_old_weights(backbone_path, model)
+        model = PeftModel.from_pretrained(
+            model, peft_path
+        )
+
+    elif "chatglm" in model_path:
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
         model = AutoModel.from_pretrained(model_path, trust_remote_code=True).half().cuda()
     elif "dolly" in model_path:
@@ -179,6 +192,8 @@ def chat_loop(model_path: str, device: str, num_gpus: str,
               max_new_tokens: int, chatio: ChatIO,
               debug: bool):
     # Model
+    if "," in model_path:
+        model_path = tuple(model_path.split(","))
     model, tokenizer = load_model(model_path, device,
         num_gpus, max_gpu_memory, load_8bit, debug)
     is_chatglm = "chatglm" in str(type(model)).lower()
